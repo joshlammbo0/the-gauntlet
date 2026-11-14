@@ -41,6 +41,9 @@ so it sees the user-site `faster-whisper` (Python 3.9, models `small.en`/`base.e
 - Grades are provisional (deterministic) first and revised by the model in a background thread; `curriculum.revise` replaces the observation.
 - Mastery states and readiness come from `curriculum.state_of` / `readiness()`; XP never influences them.
 
+## 2.1 prep command center
+- `app/engine/prep.py`: interview contexts (`prep_contexts` table), plan generation, `/api/today` feed, mock defaults (`last_mock_config` setting), weakness search/actions. `static/ux.js`: Today, Prepare, Practice, Fix, Mock, Progress/Library tabs. `controller.MODE_META` feeds the Practice screen. See USABILITY_REDESIGN.md.
+
 ## Conventions and rules
 
 - **Never fabricate the candidate's facts.** Everything about his experience comes from `app/profile/facts.py`

@@ -80,6 +80,25 @@ def _pivot_fits(template: str, q: Dict) -> bool:
     return True
 
 
+# Intent metadata for the Practice screen and launchers (duration in minutes; voice: both|text|voice-first)
+MODE_META = {
+    "daily": {"group": "quick", "minutes": "5–10", "scores": "live", "voice": "both", "when": "Every day; nothing to configure.", "improves": "Due reviews, weak skills, untested foundations"},
+    "rapid_fire": {"group": "quick", "minutes": "5–15", "scores": "live", "voice": "both", "when": "You know the formulas but freeze on the numbers.", "improves": "Speed and accuracy on definitions and mental math"},
+    "death_match": {"group": "quick", "minutes": "15–30", "scores": "live", "voice": "both", "when": "You want difficulty to climb while you are right and dig in when you are wrong.", "improves": "Depth on one topic ladder at a time"},
+    "superday": {"group": "full", "minutes": "15–60", "scores": "hidden", "voice": "both", "when": "You want it to feel like the real thing.", "improves": "Composure, pacing, mixed technical and fit"},
+    "bank_specific": {"group": "full", "minutes": "15–60", "scores": "hidden", "voice": "both", "when": "You have a specific bank and group in mind.", "improves": "Why-this-bank, group technicals, verified deal talk"},
+    "behavioral": {"group": "full", "minutes": "15–30", "scores": "live", "voice": "both", "when": "Your stories are not tight yet.", "improves": "Structure, specificity, ownership, concision"},
+    "resume_defense": {"group": "full", "minutes": "15–30", "scores": "live", "voice": "both", "when": "A bullet on your resume would not survive three follow-ups.", "improves": "Defensibility of every claim; surfaces facts you must fill in"},
+    "tmay": {"group": "full", "minutes": "10", "scores": "live", "voice": "voice-first", "when": "Before any first round.", "improves": "Beats, order, length, transitions of your opener"},
+    "deal_defense": {"group": "full", "minutes": "15–30", "scores": "live", "voice": "both", "when": "You will be asked about your pitches or a deal in the news.", "improves": "Thesis, variant view, valuation support, risks"},
+    "weakness_lab": {"group": "targeted", "minutes": "10–20", "scores": "live", "voice": "both", "when": "You know what is weak and want it fixed, not graded.", "improves": "The root-cause prerequisite, then transfer to new numbers"},
+    "explain": {"group": "targeted", "minutes": "10–15", "scores": "live", "voice": "both", "when": "One concept, until you can apply it.", "improves": "A single skill through Socratic follow-ups"},
+    "hot_seat": {"group": "pressure", "minutes": "20–45", "scores": "hidden", "voice": "both", "when": "You want every claim tested and contradictions called.", "improves": "Rigor under pressure, consistency"},
+    "deathmatch": {"group": "pressure", "minutes": "10–30", "scores": "hidden", "voice": "both", "when": "You want stakes: three lives, rising difficulty, bosses.", "improves": "Accuracy when a miss costs something"},
+    "career": {"group": "pressure", "minutes": "10–30", "scores": "hidden", "voice": "both", "when": "You want a campaign arc across banks.", "improves": "Stage-appropriate mixed interviews with pass marks"},
+}
+
+
 def _now() -> float:
     return time.time()
 
@@ -150,6 +169,14 @@ class Interview:
         sid = db.create_session(mode, cfg, state)
         if mode == "daily":
             game.daily_start(sid)
+        if mode in ("superday", "bank_specific") and not cfg.get("career"):
+            try:
+                from app.engine import prep
+                prep.remember_mock(mode, cfg)
+                if cfg.get("context_id"):
+                    prep.touch_context(cfg["context_id"])
+            except Exception:
+                pass
         iv = cls(sid)
         return iv
 

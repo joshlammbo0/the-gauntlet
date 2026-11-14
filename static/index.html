@@ -31,6 +31,11 @@ nav .brand{font-weight:700;letter-spacing:.12em;font-size:13px;color:var(--accen
 nav .brand small{display:block;color:var(--dim);letter-spacing:0;text-transform:none;font-weight:400;font-size:11px;margin-top:2px}
 nav a.item{display:block;padding:9px 10px;border-radius:8px;color:var(--muted);font-weight:500}
 nav a.item:hover,nav a.item.active{background:var(--panel2);color:var(--text)}
+nav a.item.sub{font-size:12px;padding:6px 10px;color:var(--dim)}
+.btn-tab{padding:6px 12px;border:1px solid var(--line);border-radius:8px;color:var(--muted);font-size:13px}.btn-tab.active{color:var(--text);border-color:var(--accent)}
+.kicker{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.1em}.act{position:relative;min-height:150px}.act .cta{position:absolute;bottom:14px;left:18px;color:var(--accent2);font-weight:600;font-size:13px}.act p{margin-bottom:28px}
+.room-status{font-family:var(--mono);font-size:13px;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel2)}.room-status.listening{border-color:var(--bad);color:#f0a09a}.room-status.transcribing,.room-status.thinking{border-color:var(--accent);color:var(--accent2)}.room-status.speaking{border-color:var(--info);color:var(--info)}
+.advanced{margin-top:10px}.advanced summary{font-size:12px;color:var(--dim)}
 nav .status{margin-top:auto;font-size:11px;color:var(--dim);font-family:var(--mono);line-height:1.6;padding:10px}
 nav .status b{color:var(--muted);font-weight:500}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--dim)}
@@ -119,22 +124,25 @@ summary{cursor:pointer;font-weight:500}
 <div class="app">
   <nav>
     <div class="brand">The Gauntlet 2.0<small>Master the technicals. Survive the superday.</small></div>
-    <a class="item" href="#/home" data-route="home">Dashboard</a>
-    <a class="item" href="#/career" data-route="career">Career mode</a>
-    <a class="item" href="#/lab" data-route="lab">Weakness lab</a>
-    <a class="item" href="#/modeling" data-route="modeling">Modeling lab</a>
-    <a class="item" href="#/skills" data-route="skills">Skill graph</a>
-    <a class="item" href="#/resume" data-route="resume">Resume defense</a>
-    <a class="item" href="#/history" data-route="history">History</a>
-    <a class="item" href="#/bank" data-route="bank">Question bank</a>
-    <a class="item" href="#/profile" data-route="profile">Profile &amp; KB</a>
-    <a class="item" href="#/settings" data-route="settings">Settings</a>
+    <a class="item" href="#/today" data-route="today">Today</a>
+    <a class="item" href="#/prepare" data-route="prepare">Prepare</a>
+    <a class="item" href="#/practice" data-route="practice">Practice</a>
+    <a class="item" href="#/progress" data-route="progress">Progress</a>
+    <a class="item" href="#/library" data-route="library">Library</a>
+    <a class="item" href="#/profile" data-route="profile">Profile &amp; settings</a>
+    <div class="small dim" style="padding:10px 10px 0">Shortcuts</div>
+    <a class="item sub" href="#/fix" data-route="fix">Fix a weakness</a>
+    <a class="item sub" href="#/mock" data-route="mock">Full mock</a>
+    <a class="item sub" href="#/modeling" data-route="modeling">Modeling lab</a>
+    <a class="item sub" href="#/career" data-route="career">Career mode</a>
+    <a class="item sub" href="#/settings" data-route="settings">Settings</a>
     <div class="status" id="navstatus">loading…</div>
   </nav>
   <main id="main"></main>
 </div>
 <div id="toast" class="toast hidden"></div>
-<script src="/app.js"></script>
-<script src="/game.js"></script>
+<script src="/app.js?v=2.1.0"></script>
+<script src="/game.js?v=2.1.0"></script>
+<script src="/ux.js?v=2.1.0"></script>
 </body>
 </html>

@@ -90,8 +90,29 @@ def build(session_id: str) -> Dict:
     contradictions = (s.get("state") or {}).get("contradictions", [])
     callbacks = (s.get("state") or {}).get("callbacks", [])
     pending_deep = sum(1 for e in evals if (e.get("data") or {}).get("provisional"))
+    # 30-second verdict: strengths, highest-leverage problems, next actions
+    strengths = [x for x in sorted(scored, key=lambda x: -x["score"]) if x["score"] >= 0.75][:3]
+    problems = [x for x in sorted(scored, key=lambda x: x["score"]) if x["score"] < 0.6][:3]
+    next_actions = []
+    rem = curriculum.remediation_plan(2)
+    if problems:
+        p0 = problems[0]
+        if p0.get("skill"):
+            next_actions.append({"key": "fix", "label": "Fix the root weakness: %s" % SKILLS.get(p0["skill"], p0["skill"]), "route": "#/fix/%s" % p0["skill"]})
+            next_actions.append({"key": "reattempt", "label": "Reattempt with new numbers", "evaluation_id": p0.get("evaluation_id")})
+        next_actions.append({"key": "weak", "label": "Review my %d weak answer(s)" % len(problems), "anchor": "weak"})
+    if (s.get("config") or {}).get("context_id"):
+        next_actions.append({"key": "context", "label": "Continue my interview prep plan", "route": "#/prepare/%s" % s["config"]["context_id"]})
+    if scored:
+        next_actions.append({"key": "retest", "label": "Targeted follow-up on my weakest questions", "retest": True})
+    verdict = {
+        "headline": readiness, "score": round(overall, 3) if overall is not None else None,
+        "strengths": [{"question": x["question"][:120], "skill": x["skill"], "score": x["score"]} for x in strengths],
+        "problems": [{"question": x["question"][:120], "skill": x["skill"], "score": x["score"], "key": x["key_error"]} for x in problems],
+        "next_actions": next_actions, "remediation": rem,
+    }
     return {
-        "session_id": session_id, "mode": s["mode"], "config": s["config"], "status": s["status"],
+        "session_id": session_id, "mode": s["mode"], "config": s["config"], "status": s["status"], "verdict": verdict,
         "overall": {"score": round(overall, 3) if overall is not None else None, "readiness": readiness, "n_scored": len(scored),
                     "technical_avg": round(sum(x["score"] for x in tech) / len(tech), 3) if tech else None,
                     "behavioral_avg": round(sum(x["score"] for x in beh) / len(beh), 3) if beh else None,

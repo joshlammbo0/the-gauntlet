@@ -287,6 +287,11 @@ class Selector:
             skill = self.config.get("skill")
             return self.pick_by_skill(skill) if skill else self.pick_technical()
         # superday / bank_specific / hot_seat: mix by persona emphasis and config weighting
+        focus = list(self.config.get("focus_skills") or [])
+        if focus and n > 0 and self.rng.random() < 0.6:
+            q = self.pick_by_skill(focus[n % len(focus)])
+            if q:
+                return q
         tech_w = float(self.config.get("technical_weight", 0.6))
         emph = self.persona.get("emphasis", {"technical": 0.5, "resume": 0.3, "behavioral": 0.2})
         phase = self.state.get("phase", "opening")

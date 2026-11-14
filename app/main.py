@@ -101,7 +101,7 @@ def llm_probe():
 
 @app.get("/api/modes")
 def modes():
-    return [{"key": k, **v} for k, v in controller.MODES.items()]
+    return [{"key": k, **v, "meta": controller.MODE_META.get(k, {})} for k, v in controller.MODES.items()]
 
 
 @app.get("/api/personas")
@@ -475,6 +475,103 @@ def reattempt(eid: str):
     return {"session": iv.public(), "turns": turns, "reattempt_of": eid}
 
 
+# ------------------------------------------------------------------ prep command center
+from app.engine import prep  # noqa: E402
+
+
+class ContextIn(BaseModel):
+    bank: Optional[str] = None
+    sector: Optional[str] = None
+    round: Optional[str] = "first_round"
+    date: Optional[str] = None
+    persona: Optional[str] = None
+    technical_weight: Optional[float] = None
+    emphasis: List[str] = []
+    notes: str = ""
+    include_health_story: bool = False
+
+
+class LaunchIn(BaseModel):
+    mode: str
+    config: Dict[str, Any] = {}
+
+
+@app.get("/api/today")
+def today():
+    return prep.today_feed()
+
+
+@app.get("/api/prep/contexts")
+def prep_contexts():
+    return {"contexts": prep.list_contexts(), "rounds": prep.ROUNDS, "next": prep.next_context()}
+
+
+@app.post("/api/prep/contexts")
+def prep_create(body: ContextIn):
+    return prep.save_context(body.dict())
+
+
+@app.put("/api/prep/contexts/{cid}")
+def prep_update(cid: str, body: ContextIn):
+    if not prep.get_context(cid):
+        raise HTTPException(404)
+    return prep.save_context(body.dict(), cid)
+
+
+@app.delete("/api/prep/contexts/{cid}")
+def prep_archive(cid: str):
+    prep.archive_context(cid)
+    return {"ok": True}
+
+
+@app.get("/api/prep/contexts/{cid}/plan")
+def prep_plan(cid: str):
+    ctx = prep.get_context(cid)
+    if not ctx:
+        raise HTTPException(404)
+    return prep.build_plan(ctx)
+
+
+@app.post("/api/prep/contexts/{cid}/start/{option}")
+def prep_start(cid: str, option: str):
+    ctx = prep.get_context(cid)
+    if not ctx:
+        raise HTTPException(404)
+    mode, cfg = prep.session_config_for(ctx, option)
+    iv = controller.Interview.create(mode, cfg)
+    prep.touch_context(cid)
+    return {"session": iv.public(), "turns": iv.start(), "mode": mode, "config": {k: v for k, v in cfg.items() if k != "bank_context"}}
+
+
+@app.get("/api/mock/defaults")
+def mock_defaults():
+    d = prep.mock_defaults()
+    d["config"] = {k: v for k, v in d["config"].items() if k != "bank_context"}
+    return d
+
+
+@app.post("/api/launch")
+def launch(body: LaunchIn):
+    """Generic launcher used by Today / Fix / Practice: mode + config → session."""
+    try:
+        iv = controller.Interview.create(body.mode, body.config)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, str(e))
+    return {"session": iv.public(), "turns": iv.start()}
+
+
+@app.get("/api/weakness/search")
+def weakness_search(q: str = ""):
+    return {"results": prep.search_weakness(q), "recent": prep.recently_missed(8), "recommended": [w for w in curriculum.weaknesses(8) if w["area"] not in ("behavioral", "resume", "deal")][:5]}
+
+
+@app.get("/api/weakness/{skill}")
+def weakness_detail(skill: str):
+    if skill not in SKILLS:
+        raise HTTPException(404)
+    return prep.weakness_actions(skill)
+
+
 # ------------------------------------------------------------------ modeling lab
 from app.knowledge import modeling  # noqa: E402
 
@@ -624,6 +721,14 @@ def tts_voices():
 
 
 # ------------------------------------------------------------------ static
+@app.middleware("http")
+async def _no_cache_html(request, call_next):
+    resp = await call_next(request)
+    if request.url.path in ("/", "/index.html"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
 
 

@@ -31,7 +31,8 @@ async function render() {
   const hash = location.hash || '#/home';
   const parts = hash.slice(2).split('/');
   const name = parts[0] || 'home';
-  $$('nav a.item').forEach(a => a.classList.toggle('active', a.dataset.route === name));
+  const navName = name === 'home' ? 'today' : (name === 'skills' || name === 'history' ? 'progress' : (name === 'bank' || name === 'resume' || name === 'teach' ? 'library' : name));
+  $$('nav a.item').forEach(a => a.classList.toggle('active', a.dataset.route === navName || a.dataset.route === name));
   const fn = routes[name] || routes.home;
   main.innerHTML = '<p class="muted">Loading…</p>';
   try { await fn(parts.slice(1)); } catch (e) { main.innerHTML = `<div class="card"><h4>Error</h4><p>${esc(e.message)}</p></div>`; console.error(e); }
@@ -78,7 +79,7 @@ route('home', async () => {
 });
 
 async function showSetup(mode, meta) {
-  const el = $('#setup');
+  let el = $('#setup'); if (!el) { el = document.createElement('div'); el.id = 'setup'; main.appendChild(el); }
   const [personas, banks, profile] = await Promise.all([api('/personas'), api('/banks'), api('/profile')]);
   const areas = ['accounting','valuation','dcf','ma','lbo','fig','healthcare','energy','commercial'];
   const skillsForExplain = (await api('/skills')).skills.filter(s => !s.skill.startsWith('behavioral') && !s.skill.startsWith('resume') && !s.skill.startsWith('deal'));
@@ -160,7 +161,7 @@ function renderRoom() {
       <div class="interviewer"><div class="avatar" id="avatar">${esc((s.persona.title||'I')[0])}</div><div class="who"><b>${esc(s.persona.name)}</b><span>${esc(s.persona.title)}${s.bank_context_available ? ' · firm research loaded' : ''}</span></div>
         <span class="spacer"></span><label style="margin:0;text-transform:none;letter-spacing:0;display:flex;gap:6px;align-items:center" title="Hands-free: the mic opens when the interviewer finishes speaking, stops on silence, and submits automatically"><input type="checkbox" id="handsfree" style="width:auto" ${LS.get('handsFree', true)?'checked':''}>Hands-free</label><button class="ghost small" id="replay" title="Replay the question">↻ Replay</button></div>
       <div class="question ${lastQ && lastQ.kind==='followup' ? 'followup':''}" id="question">${esc(lastQ ? lastQ.text : '…')}</div>
-      <div class="pill ${lastQ&&lastQ.kind==='followup'?'warn':'info'}" id="qkind">${lastQ ? (lastQ.kind==='followup' ? 'follow-up' + (s.followup_depth?` · depth ${s.followup_depth}`:'') : lastQ.kind) : ''}</div>
+      <div class="row"><div class="pill ${lastQ&&lastQ.kind==='followup'?'warn':'info'}" id="qkind">${lastQ ? (lastQ.kind==='followup' ? 'follow-up' + (s.followup_depth?` · depth ${s.followup_depth}`:'') : lastQ.kind) : ''}</div><span class="pill ${s.hide_scores?'warn':'good'}">${s.hide_scores?'simulation · scores hidden':'learning · live feedback'}</span><span class="spacer"></span><span class="room-status" id="roomstatus">Ready</span></div>
       <div class="transcript" id="transcript"><span class="dim">Your answer will appear here. Speak, or type below.</span></div>
       <textarea id="typed" placeholder="Type your answer here if you'd rather not speak (or to correct the transcript before submitting)…" style="margin-top:10px"></textarea>
       <div class="ctrls">
@@ -175,9 +176,9 @@ function renderRoom() {
       </div>
     </div>
     <div class="side">
-      <div class="card"><h3>Transcript</h3><div class="log" id="log"></div></div>
-      <div class="card" id="livescore"><h3>${s.hide_scores ? 'Realistic mode' : 'Live evaluation'}</h3><div id="livebody" class="small muted">${s.hide_scores ? 'Scores and coaching are hidden until the debrief, like a real interview.' : 'Answer a question to see the rubric result.'}</div></div>
-      <div class="card small muted"><div><b>Controls:</b> click the mic (or press <kbd>Space</kbd> outside the text box) to record; recording stops after ${(SETTINGS.silence_seconds||2.5)}s of silence or when you click again. Review the transcript, edit if Whisper misheard a term, then Submit.</div><div style="margin-top:6px">Engine: ${s.llm_provider} · Voice: ${voiceMode()}</div></div>
+      ${s.hide_scores ? '' : `<div class="card" id="livescore"><h3>Live evaluation</h3><div id="livebody" class="small muted">Answer a question to see the rubric result.</div></div>`}
+      <details class="card" ${s.hide_scores ? '' : ''}><summary><h3 style="display:inline">Transcript</h3></summary><div class="log" id="log"></div></details>
+      <details class="card advanced"><summary>Controls, shortcuts and status</summary><div class="small muted" style="margin-top:8px"><div><b>Hands-free:</b> the mic opens when the interviewer stops; it closes after ${(SETTINGS.silence_seconds||2.5)}s of silence and submits. Toggle it next to the interviewer.</div><div style="margin-top:4px"><b>Keys:</b> <kbd>Space</kbd> start/stop mic · <kbd>Enter</kbd> submit typed answer (Shift+Enter for a newline) · <kbd>R</kbd> replay · <kbd>P</kbd> pause · <kbd>Esc</kbd> interrupt the interviewer.</div><div style="margin-top:4px"><b>Mic trouble?</b> Type below; the Discard button clears a bad take. Edit the transcript before submitting if a term was misheard.</div><div style="margin-top:6px">Engine: ${s.llm_provider} · Voice: ${voiceMode()}${s.hide_scores?' · scores hidden until the debrief':''}</div></div></details>
     </div>
   </div>`;
   renderLog();
@@ -191,7 +192,7 @@ function renderRoom() {
   $('#pause').onclick = togglePause;
   $('#skip').onclick = async (e) => { if (!armConfirm(e.currentTarget, 'Confirm skip (counts as a miss)')) return; const r = await api(`/sessions/${Room.sid}/skip`, {method:'POST'}); handleInterviewer(r.interviewer_turns, r.state); };
   $('#endiv').onclick = async (e) => { if (!armConfirm(e.currentTarget, 'Click again to end')) return; const r = await api(`/sessions/${Room.sid}/end`, {method:'POST'}); handleInterviewer(r.interviewer_turns, r.state); };
-  document.onkeydown = (e) => { if (e.code === 'Space' && !['TEXTAREA','INPUT','SELECT'].includes(document.activeElement.tagName) && location.hash.startsWith('#/session/')) { e.preventDefault(); toggleRecord(); } };
+  document.onkeydown = (e) => { if (!location.hash.startsWith('#/session/')) return; const typing = ['TEXTAREA','INPUT','SELECT'].includes(document.activeElement.tagName); if (e.key === 'Enter' && document.activeElement.id === 'typed' && !e.shiftKey) { e.preventDefault(); submitAnswer(); return; } if (typing) return; if (e.code === 'Space') { e.preventDefault(); toggleRecord(); } else if (e.key === 'r' || e.key === 'R') speak(Room.lastQuestionText); else if (e.key === 'p' || e.key === 'P') togglePause(); else if (e.key === 'Escape') $('#avatar')?.click(); };
 }
 
 function renderLog() {
@@ -217,7 +218,7 @@ async function speak(text) {
   if (!text) return;
   const mode = voiceMode();
   const avatar = $('#avatar');
-  const setSpeaking = v => { Room.speaking = v; if (avatar) avatar.classList.toggle('speaking', v); };
+  const setSpeaking = v => { Room.speaking = v; if (avatar) avatar.classList.toggle('speaking', v); if (v) setRecStatus('Interviewer speaking'); else if (!Room.rec) setRecStatus('Ready'); };
   if (mode === 'off') return;
   if (currentAudio) { try { currentAudio.pause(); } catch(e){} currentAudio = null; }
   if (window.speechSynthesis) speechSynthesis.cancel();
@@ -268,7 +269,7 @@ async function toggleRecord() {
   startLiveSR();
   Room._recTick = setInterval(() => { if (Room.rec) setRecStatus('Recording… ' + fmtTime((Date.now()-Room.recStart)/1000)); }, 500);
 }
-function setRecStatus(s) { const el = $('#recstatus'); if (el) el.textContent = s; }
+function setRecStatus(s) { const el = $('#recstatus'); if (el) el.textContent = s; const rs = $('#roomstatus'); if (rs) { rs.textContent = s; rs.className = 'room-status ' + (/record/i.test(s) ? 'listening' : /transcrib|evaluat/i.test(s) ? 'transcribing' : /speak/i.test(s) ? 'speaking' : ''); } }
 function setTranscript(text, interim=false) { const el = $('#transcript'); if (!el) return; if (!text && !interim) { el.innerHTML = '<span class="dim">Your answer will appear here. Speak, or type below.</span>'; return; } el.innerHTML = interim ? `<span class="interim">${esc(text || 'listening…')}</span>` : esc(text); }
 function startLevelMeter() {
   try {
@@ -408,6 +409,10 @@ route('debrief', async ([sid]) => {
     </div>`).join('');
   main.innerHTML = `
     <div class="row"><h1>Debrief</h1><span class="pill acc">${esc(d.mode)}</span>${d.config.bank?`<span class="pill">${esc(d.config.bank)}</span>`:''}<span class="spacer"></span><button class="primary" id="retest">Retry my weakest questions</button><button onclick="location.hash='#/skills'">Skill map</button></div>
+    ${d.verdict ? `<div class="card" style="border-color:var(--accent);margin:14px 0"><div class="row"><h2 style="margin:0">30-second verdict</h2><span class="spacer"></span>${chip(d.verdict.score)}</div><p style="margin:8px 0 10px"><b>${esc(d.verdict.headline)}</b></p>
+      <div class="grid cols2"><div><div class="small muted">What held up</div>${d.verdict.strengths.length?d.verdict.strengths.map(x=>`<div class="small">✓ ${esc(x.question)} <span class="dim">${Math.round(x.score*100)}</span></div>`).join(''):'<div class="small dim">No answer cleared 75 this session.</div>'}</div>
+      <div><div class="small muted">Highest-leverage problems</div>${d.verdict.problems.length?d.verdict.problems.map(x=>`<div class="small">✗ ${esc(x.question)} <span class="dim">${Math.round(x.score*100)}</span>${x.key?`<div class="dim" style="margin-left:14px">${esc(x.key.slice(0,140))}</div>`:''}</div>`).join(''):'<div class="small dim">Nothing below 60.</div>'}</div></div>
+      <div class="row" style="margin-top:12px">${d.verdict.next_actions.map((a,i)=>`<button class="${i===0?'primary':''} small" data-next="${a.key}">${esc(a.label)}</button>`).join('')}</div></div>` : ''}
     <div class="grid cols4" style="margin:14px 0">
       <div class="card"><h3>Overall</h3><div class="scorebox"><div class="big">${o.score!=null?Math.round(o.score*100):'—'}</div>${o.n_scored} answers scored</div></div>
       <div class="card"><h3>Technical</h3><div class="scorebox"><div class="big">${o.technical_avg!=null?Math.round(o.technical_avg*100):'—'}</div>${Object.entries(o.by_area).filter(([a])=>a!=='behavioral').map(([a,v])=>`${a} ${Math.round(v*100)}`).join(' · ')||'—'}</div></div>
@@ -420,10 +425,11 @@ route('debrief', async ([sid]) => {
     ${d.contradictions.length?`<div class="card" style="border-color:var(--bad);margin-bottom:16px"><h3>Contradictions the interviewer noticed</h3>${d.contradictions.map(c=>`<div class="small">${esc(c.phrased)}</div>`).join('')}</div>`:''}
     ${d.technical_corrections.length?`<h2>Specific technical corrections</h2>${d.technical_corrections.map(c=>`<div class="card" style="margin-bottom:10px"><div class="small muted">${esc(c.question)}</div>${c.errors.map(e=>`<div style="color:var(--bad)">✗ ${esc(e)}</div>`).join('')}${c.omitted.length?`<div class="small" style="color:var(--warn)">Omitted: ${c.omitted.map(esc).join('; ')}</div>`:''}${c.fix?`<div class="fix">${esc(c.fix)}</div>`:''}</div>`).join('')}`:''}
     ${d.delivery.notes.length?`<h2>Delivery</h2><div class="card small">${d.delivery.notes.map(n=>`<div>· ${esc(n)}</div>`).join('')}${d.delivery.repeated_phrases.length?`<div class="dim" style="margin-top:6px">Repeated phrases: ${d.delivery.repeated_phrases.map(esc).join('; ')}</div>`:''}<div class="dim" style="margin-top:6px">These are text measurements of the transcript (plus pause lengths from the recorder). They say nothing about confidence or character.</div></div>`:''}
-    <h2>Question by question</h2>${qhtml || '<p class="muted">No answers recorded.</p>'}
+    <h2 id="weak">Question by question</h2><details open><summary class="small muted">${d.questions.length} questions · click to collapse</summary>${qhtml || '<p class="muted">No answers recorded.</p>'}</details>
     ${d.remediation.length?`<h2>What to drill next</h2><div class="grid cols2">${d.remediation.map(r=>`<div class="card"><h4>${esc(r.name)} <span class="pill warn">${r.mastery}/5</span></h4><p>${esc(r.why)}</p><ul class="small" style="margin:8px 0 8px 18px">${r.drill.map(q=>`<li>${esc(q.text)}</li>`).join('')}</ul><button class="small" data-drill="${r.skill}">Start drill</button></div>`).join('')}</div>`:''}`;
   $('#retest').onclick = async () => { try { const r = await api(`/sessions/${sid}/retest`, {method:'POST'}); navigate('#/session/'+r.session.id); } catch(e){ toast(e.message, true); } };
   $$('[data-teach]').forEach(b => b.onclick = () => navigate('#/teach/' + b.dataset.teach));
+  $$('[data-next]').forEach(b => b.onclick = async () => { const a = (d.verdict.next_actions||[]).find(x=>x.key===b.dataset.next); if (!a) return; if (a.route) return navigate(a.route); if (a.retest) return $('#retest').click(); if (a.anchor) return document.getElementById(a.anchor)?.scrollIntoView({behavior:'smooth'}); if (a.evaluation_id) { try { const r = await api(`/evaluations/${a.evaluation_id}/reattempt`, {method:'POST'}); navigate('#/session/'+r.session.id); } catch(e) { toast(e.message, true); } } });
   $$('[data-reattempt]').forEach(b => b.onclick = async () => { try { const r = await api(`/evaluations/${b.dataset.reattempt}/reattempt`, {method:'POST'}); navigate('#/session/'+r.session.id); } catch(e){ toast(e.message, true); } });
   try { const sum = (await api('/sessions?limit=200')).find(x=>x.id===sid); const g = (sum && sum.summary) || {};
     const parts = [];
@@ -595,7 +601,7 @@ route('settings', async () => {
 });
 
 /* ------------------------------------------------------------------ boot */
-window.G = { route, api, esc, chip, fmtPct, fmtTime, toast, LS, startSession, navigate, render, Room, showLiveEval, handleInterviewer, get HEALTH(){ return HEALTH; }, get SETTINGS(){ return SETTINGS; }, routes, main };
+window.G = { route, api, esc, chip, fmtPct, fmtTime, toast, LS, startSession, navigate, render, Room, showLiveEval, handleInterviewer, showSetup, get HEALTH(){ return HEALTH; }, get SETTINGS(){ return SETTINGS; }, routes, main };
 if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => {};
 const boot = () => loadHealth().then(render);
 if (document.readyState === 'complete') boot(); else window.addEventListener('load', boot);
