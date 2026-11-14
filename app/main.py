@@ -70,8 +70,10 @@ class AppealIn(BaseModel):
 class TTSIn(BaseModel):
     text: str
     voice: Optional[str] = None
-    rate: int = 175
+    rate: Optional[int] = None
     persona: Optional[str] = None
+    expressive: bool = True
+    pause_scale: float = 1.0
 
 
 class SettingsIn(BaseModel):
@@ -86,7 +88,8 @@ def health():
     active = provider.active_provider(pref)
     from app.llm.worker import POOL
     return {"ok": True, "version": __version__, "time": time.time(), "llm": provider.STATUS.to_dict(active), "llm_preference": pref, "workers": POOL.status(),
-            "whisper": stt.status(), "tts": {"available": tts.available(), "voices": [v["name"] for v in tts.voices() if v["preferred"]][:12]},
+            "whisper": stt.status(), "tts": {"available": tts.available(), "voices": [v["name"] for v in tts.voices() if v["preferred"]][:12], "premium_installed": tts.premium_installed(),
+                                              "neural": os.path.exists(os.path.join(HERE, "..", "tts-venv", "bin", "python"))},
             "bankvault": banks.available(), "questions": len(load_bank()), "numeric_generators": sorted(numeric.GENERATORS),
             "settings": s}
 
@@ -708,8 +711,8 @@ def audio(fname: str):
 
 @app.post("/api/tts")
 def speak(body: TTSIn):
-    voice = body.voice or tts.default_voice(body.persona or "vp")
-    p = tts.synthesize(body.text, voice, body.rate)
+    voice = body.voice or None
+    p = tts.synthesize(body.text, voice, body.rate or 0, body.persona, body.expressive, body.pause_scale)
     if not p:
         raise HTTPException(503, "tts unavailable")
     return FileResponse(p, media_type="audio/mp4")

@@ -98,11 +98,17 @@ def test_skip_costs_a_life_and_can_end_the_run():
 
 
 def test_deathmatch_shows_verdicts_and_hidden_modes_use_neutral_acks():
+    """Hidden-score modes never voice the verdict: reactions come from the persona's neutral set (or are skipped),
+    never from the revealing banks (strong/partial/wrong/math)."""
+    from app.engine import speech_style as ss
     assert controller.MODES["deathmatch"]["hide_scores"] is False
-    iv = controller.Interview.create("superday", {})
+    iv = controller.Interview.create("superday", {"persona": "vp"})
+    revealing = {line for sit in ("strong", "partial", "wrong", "math", "insight") for lines in ss.REACTIONS[sit].values() for line in lines}
     for score in (0.1, 0.95):
         for _ in range(20):
-            assert iv._ack({"score": score}) in controller.NEUTRAL_ACKS
+            a = iv._ack({"score": score, "verdict": "correct" if score > 0.5 else "incorrect", "kind": "technical"})
+            assert a == "" or a in ss.NEUTRAL["vp"]
+            assert a not in revealing
 
 
 def test_pivot_transitions_fit_the_next_question():

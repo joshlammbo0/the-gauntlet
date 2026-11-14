@@ -11,6 +11,12 @@ CACHE = os.environ.get("GAUNTLET_TTS_CACHE", os.path.join(HERE, "..", "..", "dat
 PREFERRED = ["Samantha", "Alex", "Daniel", "Karen", "Moira", "Tom", "Ava", "Evan", "Nathan", "Zoe", "Allison", "Susan", "Eddy (English (US))", "Flo (English (US))", "Reed (English (US))", "Rocko (English (US))", "Sandy (English (US))", "Shelley (English (US))"]
 
 PERSONA_VOICES = {"analyst": "Samantha", "associate": "Alex", "vp": "Daniel", "md": "Tom", "hot_seat": "Daniel"}
+PREMIUM_HINTS = ["Ava (Premium)", "Zoe (Premium)", "Evan (Enhanced)", "Tom (Enhanced)", "Samantha (Enhanced)", "Allison (Enhanced)", "Nathan (Enhanced)", "Joelle (Enhanced)", "Daniel (Enhanced)", "Oliver (Enhanced)", "Serena (Premium)", "Jamie (Premium)"]
+
+
+def premium_installed() -> List[str]:
+    names = {v["name"] for v in voices()}
+    return [n for n in PREMIUM_HINTS if n in names] + sorted(n for n in names if ("Premium" in n or "Enhanced" in n) and n not in PREMIUM_HINTS)
 
 
 def available() -> bool:
@@ -50,21 +56,35 @@ def default_voice(persona: str) -> str:
     return next(iter(names), "Samantha")
 
 
-def synthesize(text: str, voice: Optional[str] = None, rate: int = 175) -> Optional[str]:
-    """Return path to an m4a file (cached by content hash)."""
+def synthesize(text: str, voice: Optional[str] = None, rate: int = 175, persona: Optional[str] = None, expressive: bool = True, pause_scale: float = 1.0) -> Optional[str]:
+    """Return path to an m4a file (cached by content hash). `text` may carry <pNNN> pause markers and *emphasis*;
+    they become `say` embedded commands so questions get pauses, emphasis and a pitch lift."""
     if not available() or not text.strip():
         return None
+    from app.engine import speech_style
     os.makedirs(CACHE, exist_ok=True)
-    voice = voice or "Samantha"
-    key = hashlib.sha1(("%s|%s|%d|%s" % (voice, rate, 1, text)).encode()).hexdigest()[:20]
+    prof = speech_style.voice_profile(persona or "vp")
+    voice = voice or prof["say_voice"]
+    if voice not in {v["name"] for v in voices()}:
+        voice = default_voice(persona or "vp")
+    rate = rate or prof["say_rate"]
+    if expressive:
+        scaled = text
+        if pause_scale != 1.0:
+            import re as _re
+            scaled = _re.sub(r"<p(\d+)>", lambda m: "<p%d>" % int(int(m.group(1)) * pause_scale), text)
+        spoken = speech_style.to_say_markup(scaled, persona or "vp")
+    else:
+        spoken = speech_style.pronounce(speech_style.strip_markup(text))
+    key = hashlib.sha1(("%s|%s|%d|%s" % (voice, rate, 3, spoken)).encode()).hexdigest()[:20]
     path = os.path.join(CACHE, key + ".m4a")
     if os.path.exists(path):
         return path
     try:
-        subprocess.run(["say", "-v", voice, "-r", str(rate), "-o", path, "--file-format=m4af", text], check=True, timeout=60, capture_output=True)
+        subprocess.run(["say", "-v", voice, "-r", str(rate), "-o", path, "--file-format=m4af", spoken], check=True, timeout=60, capture_output=True)
     except Exception:
         try:
-            subprocess.run(["say", "-r", str(rate), "-o", path, "--file-format=m4af", text], check=True, timeout=60, capture_output=True)
+            subprocess.run(["say", "-r", str(rate), "-o", path, "--file-format=m4af", spoken], check=True, timeout=60, capture_output=True)
         except Exception:
             return None
     return path if os.path.exists(path) else None

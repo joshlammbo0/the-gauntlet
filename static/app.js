@@ -141,7 +141,7 @@ route('session', async ([sid]) => {
   LS.set('activeSession', sid);
   renderRoom();
   const last = [...Room.turns].reverse().find(t => t.role === 'interviewer');
-  if (last) { Room.lastQuestionText = last.text; if (!Room.session.paused) speak(last.text); }
+  if (last) { Room.lastQuestionText = last.text; Room.lastSpoken = (last.meta && last.meta.spoken) || last.text; if (!Room.session.paused) speak(last.text, Room.lastSpoken); }
   startTimer();
 });
 
@@ -186,7 +186,7 @@ function renderRoom() {
   $('#mic').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleRecord(); } };
   $('#submit').onclick = submitAnswer;
   $('#retry').onclick = () => { stopRecording(true); setTranscript(''); $('#typed').value=''; };
-  $('#replay').onclick = () => speak(Room.lastQuestionText);
+  $('#replay').onclick = () => speak(Room.lastQuestionText, Room.lastSpoken);
   $('#handsfree').onchange = (e) => { LS.set('handsFree', e.target.checked); toast(e.target.checked ? 'Hands-free on: speak after the question, pause to finish.' : 'Hands-free off: click the mic to answer.'); };
   $('#avatar').onclick = () => { if (Room.speaking) { if (window.speechSynthesis) speechSynthesis.cancel(); if (currentAudio) currentAudio.pause(); Room.speaking = false; $('#avatar').classList.remove('speaking'); toast('Interrupted the interviewer.'); } };
   $('#pause').onclick = togglePause;
@@ -214,36 +214,80 @@ async function togglePause() {
 
 /* ---------------- voice output */
 let currentAudio = null;
-async function speak(text) {
-  if (!text) return;
+let speakSeq = 0;
+const PRON = [[/\bEBITDA\b/g,'ee-bit-dah'],[/\bEBIT\b/g,'ee-bit'],[/\bWACC\b/g,'wack'],[/\bDCF\b/g,'D C F'],[/\bLBO\b/g,'L B O'],[/\bNOLs?\b/g,'N O Ls'],[/\bIRR\b/g,'I R R'],[/\bMOIC\b/g,'mo-ick'],[/\bUFCF\b/g,'unlevered free cash flow'],[/\bEV\/EBITDA\b/g,'E V to ee-bit-dah'],[/\bEV\b/g,'E V'],[/\bM&A\b/g,'M and A'],[/\bPP&E\b/g,'P P and E'],[/\bD&A\b/g,'D and A'],[/\bP\/E\b/g,'P E'],[/\bCapEx\b/g,'cap-ex'],[/\bPV-?10\b/g,'P V ten'],[/\brNPV\b/g,'risk-adjusted N P V'],[/\bNPV\b/g,'N P V'],[/\bROE\b/g,'R O E'],[/\bROIC\b/g,'ro-ick'],[/\bCET1\b/g,'C E T one'],[/\bGAAP\b/g,'gap'],[/\$(\d[\d,]*(?:\.\d+)?)\s?(B|bn|billion)\b/g,'$1 billion dollars'],[/\$(\d[\d,]*(?:\.\d+)?)\s?(M|mm|million)\b/g,'$1 million dollars'],[/\$(\d[\d,]*(?:\.\d+)?)/g,'$1 dollars'],[/(\d)\s?%/g,'$1 percent'],[/\b(\d+(?:\.\d+)?)x\b/g,'$1 times'],[/(\d+)\s?bps\b/g,'$1 basis points']];
+function pron(t) { let o = t; for (const [re, rep] of PRON) o = o.replace(re, rep); return o; }
+function chunksOf(spoken) { // split on <pNNN> markers and sentence ends -> [{text, pause}]
+  const out = []; const parts = String(spoken).split(/(<p\d+>)/); let buf = '';
+  for (const p of parts) { const m = p.match(/^<p(\d+)>$/); if (m) { if (buf.trim()) out.push({text: buf.trim(), pause: +m[1]}); buf = ''; } else buf += p; }
+  if (buf.trim()) for (const s of buf.trim().split(/(?<=[.?!])\s+(?=[A-Z])/)) if (s.trim()) out.push({text: s.trim(), pause: 140});
+  return out.map(c => ({text: pron(c.text.replace(/\*/g, '')), pause: Math.round(c.pause * (LS.get('pauseScale', 1.0)))}));
+}
+function personaVoice() { return (Room.session && Room.session.persona && Room.session.persona.voice) || {browser_rate: 1.0, browser_pitch: 1.0, say_rate: 170}; }
+async function speak(text, spoken) {
+  if (!text && !spoken) return;
   const mode = voiceMode();
   const avatar = $('#avatar');
+  const seq = ++speakSeq;
+  const payload = spoken || text;
   const setSpeaking = v => { Room.speaking = v; if (avatar) avatar.classList.toggle('speaking', v); if (v) setRecStatus('Interviewer speaking'); else if (!Room.rec) setRecStatus('Ready'); };
-  if (mode === 'off') return;
+  if (mode === 'off') { maybeAutoRecord(); return; }
   if (currentAudio) { try { currentAudio.pause(); } catch(e){} currentAudio = null; }
   if (window.speechSynthesis) speechSynthesis.cancel();
+  startBargeIn();
   if (mode === 'mac') {
     try {
-      const r = await fetch('/api/tts', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text, voice: LS.get('macVoice', null), rate: LS.get('ttsRate', 175), persona: Room.session?.persona?.key})});
+      const r = await fetch('/api/tts', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: payload, voice: LS.get('macVoice', null) || null, rate: LS.get('ttsRate', null) || null, persona: Room.session?.persona?.key, expressive: LS.get('expressive', true), pause_scale: LS.get('pauseScale', 1.0)})});
       if (!r.ok) throw new Error('tts');
+      if (seq !== speakSeq) return;
       const blob = await r.blob(); const url = URL.createObjectURL(blob);
       currentAudio = new Audio(url); setSpeaking(true);
-      currentAudio.onended = () => { setSpeaking(false); URL.revokeObjectURL(url); maybeAutoRecord(); };
-      currentAudio.onerror = () => setSpeaking(false);
+      currentAudio.onended = () => { setSpeaking(false); stopBargeIn(); URL.revokeObjectURL(url); maybeAutoRecord(); };
+      currentAudio.onerror = () => { setSpeaking(false); stopBargeIn(); };
       await currentAudio.play();
       return;
     } catch (e) { /* fall through to browser voice */ }
   }
   if (!window.speechSynthesis) return;
-  const u = new SpeechSynthesisUtterance(text);
   const wanted = LS.get('browserVoice', null);
   const voices = speechSynthesis.getVoices();
-  const v = voices.find(x => x.name === wanted) || voices.find(x => /en[-_]US/.test(x.lang) && /Samantha|Alex|Daniel|Google US|Aaron|Nicky/.test(x.name)) || voices.find(x => /en/.test(x.lang));
-  if (v) u.voice = v;
-  u.rate = LS.get('browserRate', 1.0); u.pitch = 1.0;
-  u.onstart = () => setSpeaking(true); u.onend = () => { setSpeaking(false); maybeAutoRecord(); }; u.onerror = () => setSpeaking(false);
-  speechSynthesis.speak(u);
+  const v = voices.find(x => x.name === wanted) || voices.find(x => /en[-_]US/.test(x.lang) && /Premium|Enhanced/.test(x.name)) || voices.find(x => /en[-_]US/.test(x.lang) && /Samantha|Alex|Daniel|Aaron|Nicky|Ava|Zoe|Evan|Tom/.test(x.name)) || voices.find(x => /en/.test(x.lang));
+  const pv = personaVoice();
+  const chunks = chunksOf(payload);
+  setSpeaking(true);
+  let i = 0;
+  const next = () => {
+    if (seq !== speakSeq) return;
+    if (i >= chunks.length) { setSpeaking(false); stopBargeIn(); maybeAutoRecord(); return; }
+    const c = chunks[i++];
+    const u = new SpeechSynthesisUtterance(c.text);
+    if (v) u.voice = v;
+    // questions: slightly higher pitch; long clauses a touch slower; persona sets the base
+    const isQ = /\?$/.test(c.text); const long = c.text.split(' ').length > 18;
+    u.rate = (LS.get('browserRate', null) || pv.browser_rate || 1.0) * (long ? 0.95 : 1.0) * (c.text.length < 25 ? 1.05 : 1.0);
+    u.pitch = (pv.browser_pitch || 1.0) * (isQ ? 1.06 : 1.0);
+    u.onend = () => setTimeout(next, c.pause || 0);
+    u.onerror = () => setTimeout(next, 50);
+    speechSynthesis.speak(u);
+  };
+  next();
 }
+/* barge-in: while the interviewer talks, watch the mic; sustained voice cancels the speech and opens recording */
+let bargeCtx = null, bargeStream = null, bargeRaf = null, bargeVoiceSince = 0;
+async function startBargeIn() {
+  if (!LS.get('bargeIn', true) || bargeCtx || Room.rec) return;
+  try {
+    bargeStream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}});
+    bargeCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = bargeCtx.createMediaStreamSource(bargeStream); const an = bargeCtx.createAnalyser(); an.fftSize = 1024; src.connect(an);
+    const buf = new Uint8Array(an.fftSize); const thresh = (SETTINGS.silence_threshold || 0.012) * 2.2;
+    const loop = () => { if (!bargeCtx) return; an.getByteTimeDomainData(buf); let sum = 0; for (let k=0;k<buf.length;k++){ const x=(buf[k]-128)/128; sum+=x*x; } const rms = Math.sqrt(sum/buf.length);
+      const now = Date.now(); if (rms > thresh) { if (!bargeVoiceSince) bargeVoiceSince = now; if (now - bargeVoiceSince > 650 && Room.speaking) { stopBargeIn(); if (window.speechSynthesis) speechSynthesis.cancel(); if (currentAudio) currentAudio.pause(); Room.speaking = false; speakSeq++; $('#avatar')?.classList.remove('speaking'); setRecStatus('You cut in'); toggleRecord(); return; } } else bargeVoiceSince = 0;
+      bargeRaf = requestAnimationFrame(loop); };
+    loop();
+  } catch (e) { bargeCtx = null; }
+}
+function stopBargeIn() { if (bargeRaf) cancelAnimationFrame(bargeRaf); bargeRaf = null; bargeVoiceSince = 0; if (bargeStream) { bargeStream.getTracks().forEach(t=>t.stop()); bargeStream = null; } if (bargeCtx) { try { bargeCtx.close(); } catch(e){} bargeCtx = null; } }
 function handsFree() { return LS.get('handsFree', true); }
 function maybeAutoRecord() { if ((handsFree() || LS.get('autoRecord', false)) && Room.sid && !Room.rec && !Room.session?.paused && !Room.session?.ended && !Room.pending && location.hash.startsWith('#/session/')) setTimeout(() => { if (!Room.rec && !Room.speaking) toggleRecord(); }, 350); }
 const MAX_ANSWER_SEC = { numeric: 90, technical: 150, behavioral: 150, resume: 150, followup: 120 };
@@ -291,7 +335,12 @@ function startLevelMeter() {
       const lastQ = [...Room.turns].reverse().find(t => t.role === 'interviewer');
       const cap = MAX_ANSWER_SEC[(lastQ && lastQ.kind) || 'technical'] || 150;
       if (LS.get('interruptLong', true) && elapsed > cap) { Room._interrupted = true; setRecStatus('Interviewer cut in'); stopRecording(false); return; }
-      if (LS.get('autoStop', true) && elapsed > minSec && (now - Room.lastVoiceAt)/1000 > silenceSec && Room.lastVoiceAt > Room.recStart + 800) { stopRecording(false); return; }
+      // thinking pause vs finished: if the live caption ends mid-sentence (no terminal punctuation) or the answer is still short, wait longer
+      const capt = (Room.finalSR + ' ' + Room.interim).trim();
+      const unfinished = capt && !/[.?!]$/.test(capt) && !/(?:that's it|that is it|done|so yeah|that's my answer)\s*[.!]?$/i.test(capt);
+      const fewWords = capt && capt.split(/\s+/).length < 12;
+      const need = silenceSec * (unfinished ? 1.6 : 1.0) * (fewWords ? 1.3 : 1.0);
+      if (LS.get('autoStop', true) && elapsed > minSec && (now - Room.lastVoiceAt)/1000 > Math.min(need, 6.5) && Room.lastVoiceAt > Room.recStart + 800) { stopRecording(false); return; }
       Room.levelRaf = requestAnimationFrame(loop);
     };
     loop();
@@ -348,7 +397,7 @@ async function submitAnswer() {
   const text = typed || p.text || '';
   if (!text) { toast('Nothing to submit yet.', true); return; }
   const payload = {text, duration: p.duration || (typed ? Math.max(5, typed.split(/\s+/).length/150*60) : null), pauses: p.pauses || [], transcript_id: p.transcript_id || null, raw_transcript: p.raw || null, input_mode: p.text ? (typed !== p.text ? 'voice-corrected' : p.input_mode) : 'text', interrupted: !!p.interrupted};
-  $('#submit').disabled = true; setRecStatus('Evaluating…');
+  $('#submit').disabled = true; setRecStatus('Interviewer thinking…'); stopBargeIn();
   try {
     const r = await api(`/sessions/${Room.sid}/answer`, {method:'POST', body: payload});
     Room.pending = null; $('#typed').value = ''; setTranscript('');
@@ -367,10 +416,10 @@ function handleInterviewer(turns, state) {
   const last = (turns||[]).slice(-1)[0];
   if (state.ended) { toast('Interview over. Building your debrief…'); if (last) speak(last.text); setTimeout(()=>navigate('#/debrief/'+Room.sid), last ? 2500 : 300); return; }
   if (last) {
-    Room.lastQuestionText = last.text;
+    Room.lastQuestionText = last.text; Room.lastSpoken = (last.meta && last.meta.spoken) || last.text;
     $('#question').textContent = last.text; $('#question').className = 'question' + (last.kind==='followup' ? ' followup' : '');
     const k = $('#qkind'); k.textContent = last.kind==='followup' ? 'follow-up' + (state.followup_depth ? ` · depth ${state.followup_depth}` : '') + (last.meta?.reason ? ' · ' + last.meta.reason.replace(/_/g,' ') : '') : last.kind; k.className = 'pill ' + (last.kind==='followup'?'warn':'info');
-    speak(turns.map(t=>t.text).join(' '));
+    speak(turns.map(t=>t.text).join(' '), turns.map(t => (t.meta && t.meta.spoken) || t.text).join(' <p500> '));
   }
   const pb = $('#pause'); if (pb) pb.textContent = state.paused ? 'Resume' : 'Pause';
 }
@@ -571,12 +620,16 @@ route('settings', async () => {
         <label>Interviewer voice</label><select id="st_voice"><option value="browser">Browser speech (instant)</option><option value="mac">Mac system voice (higher quality, via server)</option><option value="off">Off (read the question)</option></select>
         <label>Browser voice</label><select id="st_bvoice"><option value="">auto</option>${bvoices.map(v=>`<option>${esc(v.name)}</option>`).join('')}</select>
         <label>Mac voice</label><select id="st_mvoice"><option value="">auto by persona</option>${voices.map(v=>`<option ${v.preferred?'':'class="dim"'}>${esc(v.name)}</option>`).join('')}</select>
-        <label>Speech rate (Mac wpm)</label><input id="st_rate" type="number" min="120" max="240" value="${LS.get('ttsRate',175)}">
+        <label>Speech rate (Mac wpm; blank = persona default)</label><input id="st_rate" type="number" min="120" max="240" value="${LS.get('ttsRate','')||''}" placeholder="persona default">
         <label>Microphone</label><select id="st_mic"><option value="">default</option>${mics.map(m=>`<option value="${m.deviceId}">${esc(m.label||m.deviceId.slice(0,8))}</option>`).join('')}</select>
         <label><input type="checkbox" id="st_autostop" style="width:auto;margin-right:6px">Stop recording automatically after silence</label>
         <label>Silence seconds before auto-stop</label><input id="st_sil" type="number" step="0.5" min="1" max="8" value="${SETTINGS.silence_seconds||2.5}">
         <label>Minimum answer seconds before auto-stop can trigger</label><input id="st_min" type="number" min="1" max="30" value="${SETTINGS.min_answer_seconds||4}">
-        <label><input type="checkbox" id="st_live" style="width:auto;margin-right:6px">Show live browser captions while recording (if supported)</label>
+        <label><input type="checkbox" id="st_live" style="width:auto;margin-right:6px">Show live browser captions while recording (if supported; also used to tell a thinking pause from a finished answer)</label>
+        <label><input type="checkbox" id="st_barge" style="width:auto;margin-right:6px">Barge-in: start talking over the interviewer to cut it off</label>
+        <label><input type="checkbox" id="st_expr" style="width:auto;margin-right:6px">Expressive delivery (pauses, emphasis, question intonation)</label>
+        <label>Pause length <span id="st_psv" class="dim">${LS.get('pauseScale',1.0)}×</span></label><input id="st_pause" type="range" min="0.5" max="2" step="0.1" value="${LS.get('pauseScale',1.0)}" oninput="document.getElementById('st_psv').textContent=this.value+'×'">
+        ${h.tts.premium_installed && h.tts.premium_installed.length ? `<div class="hint" style="color:var(--good)">Higher-quality system voices installed: ${h.tts.premium_installed.map(esc).join(', ')}. Pick one below for the Mac voice.</div>` : `<div class="hint" style="color:var(--warn)">No Premium/Enhanced Apple voices are installed. The biggest single improvement in realism: System Settings → Accessibility → Spoken Content → System Voice → Manage Voices → download an English (US) <b>Premium</b> voice (Ava, Zoe, Evan, Tom). Free, local, ~100–300 MB each; it then appears in the Mac voice list here.</div>`}
         <label><input type="checkbox" id="st_autorec" style="width:auto;margin-right:6px">Start recording automatically when the interviewer finishes speaking</label>
         <label><input type="checkbox" id="st_autosub" style="width:auto;margin-right:6px">Submit automatically after transcription (no review step)</label>
         <label><input type="checkbox" id="st_keep" style="width:auto;margin-right:6px">Keep recordings on disk (data/audio); off by default. Transcripts are always kept with the session.</label>
@@ -589,12 +642,12 @@ route('settings', async () => {
     <div class="row" style="margin-top:16px"><button class="primary" id="save">Save</button><span class="muted small" id="saved"></span></div>`;
   $('#st_llm').value = SETTINGS.llm_provider || 'auto'; $('#st_excerpts').checked = SETTINGS.send_guide_excerpts !== false; $('#st_use_llm').checked = SETTINGS.use_llm !== false; $('#st_llm_iv').checked = SETTINGS.llm_interviewer !== false;
   $('#st_voice').value = voiceMode(); $('#st_bvoice').value = LS.get('browserVoice','')||''; $('#st_mvoice').value = LS.get('macVoice','')||''; $('#st_mic').value = LS.get('micId','')||'';
-  $('#st_autostop').checked = LS.get('autoStop', true); $('#st_interrupt').checked = LS.get('interruptLong', true); $('#st_live').checked = LS.get('liveCaptions', true); $('#st_autorec').checked = LS.get('autoRecord', false); $('#st_autosub').checked = LS.get('autoSubmit', false); $('#st_keep').checked = LS.get('keepAudio', false);
+  $('#st_autostop').checked = LS.get('autoStop', true); $('#st_interrupt').checked = LS.get('interruptLong', true); $('#st_barge').checked = LS.get('bargeIn', true); $('#st_expr').checked = LS.get('expressive', true); $('#st_live').checked = LS.get('liveCaptions', true); $('#st_autorec').checked = LS.get('autoRecord', false); $('#st_autosub').checked = LS.get('autoSubmit', false); $('#st_keep').checked = LS.get('keepAudio', false);
   $('#st_health').checked = !!SETTINGS.include_health_story;
   $('#probe').onclick = async () => { const r = await api('/llm/probe', {method:'POST'}); toast(r.cli_logged_in ? 'Claude CLI is logged in and usable.' : 'Claude CLI not logged in: ' + (r.status.last_error||'').slice(0,120), !r.cli_logged_in); render(); };
   $('#save').onclick = async () => {
-    LS.set('voiceMode', $('#st_voice').value); LS.set('browserVoice', $('#st_bvoice').value||null); LS.set('macVoice', $('#st_mvoice').value||null); LS.set('ttsRate', +$('#st_rate').value); LS.set('micId', $('#st_mic').value||null);
-    LS.set('autoStop', $('#st_autostop').checked); LS.set('interruptLong', $('#st_interrupt').checked); LS.set('liveCaptions', $('#st_live').checked); LS.set('autoRecord', $('#st_autorec').checked); LS.set('autoSubmit', $('#st_autosub').checked); LS.set('keepAudio', $('#st_keep').checked);
+    LS.set('voiceMode', $('#st_voice').value); LS.set('browserVoice', $('#st_bvoice').value||null); LS.set('macVoice', $('#st_mvoice').value||null); LS.set('ttsRate', $('#st_rate').value ? +$('#st_rate').value : null); LS.set('micId', $('#st_mic').value||null);
+    LS.set('autoStop', $('#st_autostop').checked); LS.set('interruptLong', $('#st_interrupt').checked); LS.set('bargeIn', $('#st_barge').checked); LS.set('expressive', $('#st_expr').checked); LS.set('pauseScale', +$('#st_pause').value); LS.set('liveCaptions', $('#st_live').checked); LS.set('autoRecord', $('#st_autorec').checked); LS.set('autoSubmit', $('#st_autosub').checked); LS.set('keepAudio', $('#st_keep').checked);
     await api('/settings', {method:'POST', body:{settings:{llm_provider: $('#st_llm').value, use_llm: $('#st_use_llm').checked, llm_interviewer: $('#st_llm_iv').checked, silence_seconds: +$('#st_sil').value, min_answer_seconds: +$('#st_min').value, include_health_story: $('#st_health').checked, send_guide_excerpts: $('#st_excerpts').checked}}});
     $('#saved').textContent = 'Saved.'; loadHealth();
   };

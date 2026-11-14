@@ -21,6 +21,7 @@ from app import db
 from app.knowledge.bank import load_bank, Question
 from app.knowledge import numeric, banks, sources
 from app.engine import personas, selector as selector_mod, followup, claims as claims_mod
+from app.engine import speech_style
 from app.engine.evaluator import evaluate_technical, evaluate_numeric
 from app.engine.behavioral import evaluate_behavioral
 from app.engine import curriculum
@@ -232,11 +233,22 @@ class Interview:
                 "career": self.config.get("career"), "daily": self.config.get("daily"), "focus_skills": self.config.get("focus_skills"), "xp_earned": self.state.get("xp_earned", 0)}
 
     # ------------------------------------------------------------------ turns
-    def _say(self, text: str, kind: str, question_id: Optional[str], meta: Optional[Dict] = None) -> Dict:
+    @property
+    def persona_key(self) -> str:
+        return "hot_seat" if self.mode == "hot_seat" else self.config.get("persona", "vp")
+
+    def _say(self, text: str, kind: str, question_id: Optional[str], meta: Optional[Dict] = None, spoken: Optional[str] = None) -> Dict:
+        """Store the written turn; attach a spoken rendering (conversational wording + pause markers) for TTS.
+        Grading and the transcript use `text`; only the voice uses `spoken`."""
         idx = self.state["turn_idx"]
+        meta = dict(meta or {})
+        if spoken is None:
+            spoken = speech_style.spokenize(text, self.persona_key, kind, self.rng, opener=(kind in ("technical", "behavioral", "resume", "numeric", "deal")))
+        meta["spoken"] = spoken
+        meta["voice"] = speech_style.voice_profile(self.persona_key)
         tid = db.add_turn(self.id, idx, "interviewer", text, question_id, kind, meta)
         self.state["turn_idx"] = idx + 1
-        return {"turn_id": tid, "idx": idx, "role": "interviewer", "text": text, "kind": kind, "question_id": question_id, "meta": meta or {}}
+        return {"turn_id": tid, "idx": idx, "role": "interviewer", "text": text, "kind": kind, "question_id": question_id, "meta": meta}
 
     def _ask_main(self, q: Dict, prefix: str = "") -> Dict:
         self.state["current"] = q
@@ -248,10 +260,15 @@ class Interview:
         if self.mode == "tmay":
             text = self._tmay_prompt(q)
         meta = {"source": q["source"], "difficulty": q["difficulty"], "skill": q["skill"], "level": q.get("level")}
+        pauses = speech_style.PAUSES.get(self.persona_key, speech_style.PAUSES["vp"])
+        body = q["text"] if self.mode != "tmay" else text
         if q.get("callback_of"):
             meta["callback_of"] = q["callback_of"]
             text = (prefix + " " if prefix else "") + "Going back to something from earlier. " + q["text"]
-        return self._say(text, q["kind"], q["id"], meta)
+            body = "Going back to something from earlier. <p%d> %s" % (pauses["sentence"], q["text"])
+        spoken_q = speech_style.spokenize(body, self.persona_key, q["kind"], self.rng, opener=not prefix)
+        spoken = ("%s <p%d> %s" % (prefix, pauses["think"], spoken_q)) if prefix else spoken_q
+        return self._say(text, q["kind"], q["id"], meta, spoken=spoken)
 
     def _tmay_prompt(self, q: Dict) -> str:
         secs = self.state.get("tmay_variant", 90)
@@ -582,7 +599,10 @@ class Interview:
             text = claims_mod.phrase(contradictions[0])
             self.state["followup_depth"] += 1
             self.state["phase"] = "probing"
-            turns.append(self._say(text, "followup", cur["id"], {"reason": "contradiction", "root": self.state["root_question"]["id"]}))
+            lead = self._ack(ev, "probe", "contradiction")
+            pause = speech_style.PAUSES.get(self.persona_key, speech_style.PAUSES["vp"])["challenge"]
+            turns.append(self._say(text, "followup", cur["id"], {"reason": "contradiction", "root": self.state["root_question"]["id"]},
+                                   spoken="%s <p%d> %s" % (lead, pause, speech_style.spokenize(text, self.persona_key, "followup", self.rng, opener=False)) if lead else None))
             return turns
         if self.mode in ("explain", "weakness_lab"):
             return self._explain_policy(cur, ev)
@@ -632,6 +652,12 @@ class Interview:
                 text = self._resume_probe(cur, ev, reason)
             else:
                 text = followup.phrase_probe(reason or "missing_causal", details, cur["text"], self.rng)
+            reaction = self._ack(ev, action, reason)
+            if reaction and not text.lower().startswith(tuple(w.lower() for w in ("okay", "hm", "fine", "right", "that's", "you", "no", "wait", "hang"))):
+                pause = speech_style.PAUSES.get(self.persona_key, speech_style.PAUSES["vp"])["challenge"]
+                spoken_fu = "%s <p%d> %s" % (reaction, pause, speech_style.spokenize(text, self.persona_key, "followup", self.rng, opener=False))
+            else:
+                spoken_fu = None
             if text in used:
                 # never ask the same follow-up twice: vary the probe or move on
                 alt = followup.phrase_probe(reason or "missing_causal", details, cur["text"], self.rng)
@@ -650,19 +676,24 @@ class Interview:
                 self.state["current"] = nq
                 self.state["asked"].append(nq["id"])
                 meta["chained_to"] = nq["id"]
-                turns.append(self._say(text, "followup", nq["id"], meta))
+                turns.append(self._say(text, "followup", nq["id"], meta, spoken=spoken_fu))
             else:
-                turns.append(self._say(text, "followup", cur["id"], meta))
+                turns.append(self._say(text, "followup", cur["id"], meta, spoken=spoken_fu))
             return turns
         return self._pivot(ack=self._ack(ev))
 
-    def _ack(self, ev: Dict) -> str:
-        if MODES[self.mode]["hide_scores"]:
-            # scores are hidden: the acknowledgement must not hint at the verdict
-            return NEUTRAL_ACKS[self.rng.randrange(len(NEUTRAL_ACKS))]
-        score = ev.get("score") or 0
-        bank_ = self.persona["ack_good"] if score >= 0.7 else self.persona["ack_neutral"]
-        return bank_[self.rng.randrange(len(bank_))]
+    def _ack(self, ev: Dict, action: str = "pivot", reason: Optional[str] = None) -> str:
+        """Short, grounded reaction in the persona's voice; never the same line twice in a row. In hidden-score
+        modes only verdict-neutral reactions are used (poker face), except for dodges, rambling, contradictions
+        and requests for specifics, which a real interviewer voices regardless."""
+        recent = self.state.setdefault("recent_reactions", [])
+        density = speech_style.voice_profile(self.persona_key)["ack_density"]
+        text, sit = speech_style.react(ev, action, reason, self.persona_key, self.rng, recent, density, hide_scores=MODES[self.mode]["hide_scores"])
+        if text:
+            recent.append(text)
+            del recent[:-6]
+        self.state["last_situation"] = sit
+        return text
 
     def _style(self, text: str, ev: Dict, action: str) -> str:
         if self.mode in ("hot_seat",) and action == "probe" and self.rng.random() < 0.4:
