@@ -42,6 +42,21 @@
   for a listening test.
 - Offline deterministic turns verified end to end (see TEST_REPORT).
 
+## Neural voice: Kokoro (installed 2026-11-14)
+
+Kokoro-82M runs locally in a Python 3.12 sidecar (`tts-venv`, `kokoro-onnx` + onnxruntime), started by the app on launch
+when `data/kokoro/kokoro-v1.0.onnx` and `voices-v1.0.bin` are present (gitignored, ~340 MB, from the kokoro-onnx
+`model-files-v1.0` release). `scripts/kokoro_server.py` listens on 127.0.0.1:8872; `POST /synth` turns a spoken turn
+into 24 kHz WAV: `<pNNN>` markers become real silence, each sentence is synthesized on its own so intonation resets,
+`*emphasis*` slows that sentence slightly, and the pronunciation table is applied first.
+
+- Engine order (`/api/tts`): Kokoro when installed and `tts_engine` is `auto`/`kokoro`, else macOS `say`, else browser.
+  Settings shows the active engine (`/api/tts/engines`) and lets you pick any of the 28 English voices or keep per persona.
+- Persona voices: analyst `af_heart` 1.06×, associate `am_michael` 1.0×, VP `am_fenrir` 0.95×, MD `am_onyx` 0.9×, Hot Seat `bm_george` 1.05×.
+- Measured on this Mac (CPU): warm start 1.8 s; one short reaction + question ≈ 1.3 s for 4 s of audio; a long three-statement prompt 2.3 s for 9.5 s of audio. Results are cached in `data/tts/*.wav`, so repeated lines are instant.
+- Listening renders: `.venv/bin/python scripts/voice_demo.py` now writes `data/voice_demo/*.wav` through Kokoro (`--engine say` for the old renders).
+- Tests: `tests/test_kokoro.py` (skipped on machines without the sidecar) checks engine selection and that a `<p600>` marker lengthens the audio.
+
 ## Still limited by the engine
 - The compact Apple voices remain the ceiling for timbre. The single biggest audible upgrade is free and local: System Settings →
   Accessibility → Spoken Content → System Voice → Manage Voices → download an English (US) **Premium** voice (Ava, Zoe, Evan, Tom).
@@ -51,6 +66,9 @@
 - Emotional colouring (surprise, impatience) is approximated by wording, pauses and pitch; the compact voices cannot render it.
 
 ## Manual listening test (Chrome)
+
+In Settings, leave Interviewer voice on "Server voice" so Kokoro is used; the engine line under it should read `kokoro`.
+
 1. Settings → Voice: choose Mac system voice; if a Premium voice is installed pick it; leave Expressive on, pause 1.0×.
 2. Start Deathmatch (analyst persona) and a Hot Seat run: compare openers, pacing and reactions.
 3. Give one wrong, one half, one correct answer in a learning mode (Death Match ladder) and listen for "Not quite…", "You're on the right track, but…", "Yep, that's right."

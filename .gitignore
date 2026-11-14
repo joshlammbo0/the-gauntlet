@@ -6,3 +6,4 @@ __pycache__/
 .pytest_cache/
 app/profile/facts_private.py
 docs/img/*.tmp
+tts-venv/

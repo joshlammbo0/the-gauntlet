@@ -32,7 +32,8 @@ so it sees the user-site `faster-whisper` (Python 3.9, models `small.en`/`base.e
 - `app/llm/` provider abstraction: `anthropic_api` (needs ANTHROPIC_API_KEY in `.env`),
   `claude_cli` (desktop app binary, needs `claude /login`), `offline` (deterministic; always on).
 - `app/speech/` `stt.py` (faster-whisper with finance vocabulary prompt + correction table),
-  `tts.py` (macOS `say` → m4a; browser speechSynthesis is the client-side default).
+  `tts.py` (Kokoro neural sidecar → wav when installed, else macOS `say` → m4a; browser speechSynthesis as the no-server fallback).
+- Kokoro: `tts-venv` (uv Python 3.12, `kokoro-onnx soundfile numpy`) + model files in `data/kokoro/` (both gitignored). `scripts/kokoro_server.py` on :8872 is spawned by the app at startup; `tts_engine` setting `auto|kokoro|say`. See VOICE.md.
 
 ## 2.0 additions
 - `app/knowledge/ingest.py` + `sources.py`: local guides → `data/knowledge/source_questions.json` (regenerate with `python app/knowledge/ingest.py`; idempotent). Guides never leave the Mac except excerpts in grading prompts when `send_guide_excerpts` is on.

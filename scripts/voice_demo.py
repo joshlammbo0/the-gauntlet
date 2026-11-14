@@ -3,7 +3,7 @@
 Writes data/voice_demo/<persona>_<n>.m4a for a technical question, a behavioral question, a reaction to
 a wrong answer, a reaction to a correct answer, a contradiction call and a ramble cut-off, in each
 persona's voice. Also writes the spoken text alongside so you can compare what was said.
-Usage: .venv/bin/python scripts/voice_demo.py [--voice "Ava (Premium)"]
+Usage: .venv/bin/python scripts/voice_demo.py [--voice "Ava (Premium)"] [--engine say|kokoro]  (default: kokoro when installed)
 """
 import os
 import random
@@ -17,6 +17,7 @@ OUT = os.path.join(os.path.dirname(__file__), "..", "data", "voice_demo")
 voice_override = None
 if "--voice" in sys.argv:
     voice_override = sys.argv[sys.argv.index("--voice") + 1]
+ENGINE = sys.argv[sys.argv.index("--engine") + 1] if "--engine" in sys.argv else tts.engine("auto")
 
 SCENES = [
     ("technical", "Explain the impact of a $10 increase in depreciation, assuming a 25% tax rate, on all three financial statements.", None),
@@ -44,15 +45,19 @@ def main():
                 spoken = "%s <p%d> %s" % (lead, pause, ss.spokenize(text, persona, "followup", rng, opener=False)) if lead else ss.spokenize(text, persona, "followup", rng, opener=False)
             else:
                 spoken = ss.spokenize(text, persona, label if label != "numeric" else "numeric", rng)
-            path = tts.synthesize(spoken, voice_override, 0, persona, True, 1.0)
-            dest = os.path.join(OUT, "%s_%d_%s.m4a" % (persona, i + 1, label))
+            if ENGINE == "kokoro":
+                path = tts.synthesize_kokoro(spoken, persona, voice_override, 1.0)
+                dest = os.path.join(OUT, "%s_%d_%s.wav" % (persona, i + 1, label))
+            else:
+                path = tts.synthesize(spoken, voice_override, 0, persona, True, 1.0)
+                dest = os.path.join(OUT, "%s_%d_%s.m4a" % (persona, i + 1, label))
             if path:
                 os.replace(path, dest)
             rows.append((persona, label, spoken, ss.to_say_markup(spoken, persona), dest if path else "(no audio)"))
     with open(os.path.join(OUT, "spoken.txt"), "w") as f:
         for p, label, spoken, markup, dest in rows:
             f.write("[%s / %s]\n  spoken: %s\n  say:    %s\n  file:   %s\n\n" % (p, label, ss.strip_markup(spoken), markup, os.path.basename(dest)))
-    print("wrote %d renders to %s" % (len(rows), os.path.abspath(OUT)))
+    print("wrote %d renders (%s engine) to %s" % (len(rows), ENGINE, os.path.abspath(OUT)))
     for p, label, spoken, markup, dest in rows[:7]:
         print("  %-10s %-13s %s" % (p, label, ss.strip_markup(spoken)[:110]))
 

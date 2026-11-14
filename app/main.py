@@ -35,6 +35,8 @@ def _startup() -> None:
         print("QUESTION BANK ERRORS:\n" + "\n".join(errs))
     if db.get_setting("preload_whisper", True):
         stt.preload_async()
+    if db.get_setting("tts_engine", "auto") in ("auto", "kokoro"):
+        tts.start_kokoro()
 
 
 # ------------------------------------------------------------------ models
@@ -89,7 +91,7 @@ def health():
     from app.llm.worker import POOL
     return {"ok": True, "version": __version__, "time": time.time(), "llm": provider.STATUS.to_dict(active), "llm_preference": pref, "workers": POOL.status(),
             "whisper": stt.status(), "tts": {"available": tts.available(), "voices": [v["name"] for v in tts.voices() if v["preferred"]][:12], "premium_installed": tts.premium_installed(),
-                                              "neural": os.path.exists(os.path.join(HERE, "..", "tts-venv", "bin", "python"))},
+                                              "neural": tts.kokoro_installed(), "engine": tts.engine(s.get("tts_engine", "auto"))},
             "bankvault": banks.available(), "questions": len(load_bank()), "numeric_generators": sorted(numeric.GENERATORS),
             "settings": s}
 
@@ -711,11 +713,24 @@ def audio(fname: str):
 
 @app.post("/api/tts")
 def speak(body: TTSIn):
+    eng = tts.engine(db.get_setting("tts_engine", "auto"))
+    if eng == "kokoro":
+        p = tts.synthesize_kokoro(body.text, body.persona, db.get_setting("kokoro_voice") or None, body.pause_scale)
+        if p:
+            return FileResponse(p, media_type="audio/wav", headers={"X-TTS-Engine": "kokoro"})
     voice = body.voice or None
     p = tts.synthesize(body.text, voice, body.rate or 0, body.persona, body.expressive, body.pause_scale)
     if not p:
         raise HTTPException(503, "tts unavailable")
-    return FileResponse(p, media_type="audio/mp4")
+    return FileResponse(p, media_type="audio/mp4", headers={"X-TTS-Engine": "say"})
+
+
+@app.get("/api/tts/engines")
+def tts_engines():
+    kh = tts.kokoro_health(0.8)
+    return {"active": tts.engine(db.get_setting("tts_engine", "auto")), "preference": db.get_setting("tts_engine", "auto"),
+            "kokoro": {"installed": tts.kokoro_installed(), "running": bool(kh), "voices": (kh or {}).get("voices", []), "persona_voices": tts.KOKORO_VOICES, "selected": db.get_setting("kokoro_voice")},
+            "say": {"available": tts.available(), "premium_installed": tts.premium_installed()}}
 
 
 @app.get("/api/tts/voices")

@@ -19,6 +19,85 @@ def premium_installed() -> List[str]:
     return [n for n in PREMIUM_HINTS if n in names] + sorted(n for n in names if ("Premium" in n or "Enhanced" in n) and n not in PREMIUM_HINTS)
 
 
+ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
+KOKORO_PORT = int(os.environ.get("KOKORO_PORT", "8872"))
+KOKORO_MODEL = os.path.join(ROOT, "data", "kokoro", "kokoro-v1.0.onnx")
+KOKORO_PY = os.path.join(ROOT, "tts-venv", "bin", "python")
+KOKORO_VOICES = {"analyst": "af_heart", "associate": "am_michael", "vp": "am_fenrir", "md": "am_onyx", "hot_seat": "bm_george"}
+KOKORO_SPEED = {"analyst": 1.06, "associate": 1.0, "vp": 0.95, "md": 0.9, "hot_seat": 1.05}
+_sidecar = None
+
+
+def kokoro_installed() -> bool:
+    return os.path.exists(KOKORO_MODEL) and os.path.exists(KOKORO_PY)
+
+
+def kokoro_health(timeout: float = 1.5) -> Optional[Dict]:
+    try:
+        import httpx
+        r = httpx.get("http://127.0.0.1:%d/health" % KOKORO_PORT, timeout=timeout)
+        return r.json() if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
+def start_kokoro() -> bool:
+    """Launch the neural sidecar (tts-venv) if installed and not already running. Local only."""
+    global _sidecar
+    if not kokoro_installed():
+        return False
+    if kokoro_health():
+        return True
+    try:
+        import subprocess as sp
+        log = open(os.path.join(ROOT, "data", "kokoro.log"), "a")
+        _sidecar = sp.Popen([KOKORO_PY, os.path.join(ROOT, "scripts", "kokoro_server.py")], stdout=log, stderr=log, env={**os.environ, "KOKORO_PORT": str(KOKORO_PORT)})
+        return True
+    except Exception:
+        return False
+
+
+def engine(preference: Optional[str] = None) -> str:
+    """'kokoro' when the sidecar is installed (and preference allows), else 'say', else 'none'."""
+    pref = preference or "auto"
+    if pref in ("kokoro", "auto") and kokoro_installed():
+        return "kokoro"
+    if pref != "kokoro" and available():
+        return "say"
+    return "say" if available() else "none"
+
+
+def synthesize_kokoro(text: str, persona: Optional[str], voice: Optional[str], pause_scale: float = 1.0, speed: Optional[float] = None) -> Optional[str]:
+    """Neural synthesis through the sidecar; returns a cached wav path."""
+    if not kokoro_installed():
+        return None
+    if not kokoro_health(0.8):
+        start_kokoro()
+        for _ in range(40):  # model warm-up ~4 s
+            if kokoro_health(0.8):
+                break
+            __import__("time").sleep(0.25)
+        else:
+            return None
+    os.makedirs(CACHE, exist_ok=True)
+    v = voice or KOKORO_VOICES.get(persona or "vp", "am_fenrir")
+    spd = speed or KOKORO_SPEED.get(persona or "vp", 1.0)
+    key = hashlib.sha1(("kokoro|%s|%.2f|%.2f|%s" % (v, spd, pause_scale, text)).encode()).hexdigest()[:20]
+    path = os.path.join(CACHE, key + ".wav")
+    if os.path.exists(path):
+        return path
+    try:
+        import httpx
+        r = httpx.post("http://127.0.0.1:%d/synth" % KOKORO_PORT, json={"text": text, "voice": v, "speed": spd, "pause_scale": pause_scale}, timeout=60)
+        if r.status_code != 200:
+            return None
+        with open(path, "wb") as f:
+            f.write(r.content)
+        return path
+    except Exception:
+        return None
+
+
 def available() -> bool:
     return os.path.exists("/usr/bin/say")
 

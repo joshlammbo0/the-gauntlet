@@ -51,7 +51,7 @@ async function loadHealth() {
     <div><span class="dot ${HEALTH.bankvault?'ok':'warn'}"></span><b>bankvault</b> ${HEALTH.bankvault?'linked':'missing'}</div>
     <div class="dim">${HEALTH.questions} questions · v${HEALTH.version}</div>`;
 }
-function voiceMode(){ return LS.get('voiceMode', 'browser'); }
+function voiceMode(){ return LS.get('voiceMode', null) || ((HEALTH && HEALTH.tts && HEALTH.tts.neural) ? 'mac' : 'browser'); }
 
 /* ------------------------------------------------------------------ home */
 route('home', async () => {
@@ -617,7 +617,9 @@ route('settings', async () => {
         ${h.workers && h.workers.turns ? `<div class="hint">Persistent model workers: ${h.workers.turns} turns, avg ${h.workers.avg_ms} ms, ${h.workers.failures} failures.</div>` : ''}
         <div class="row" style="margin-top:8px"><button class="small" id="probe">Probe Claude CLI</button></div></div>
       <div class="card"><h3>Voice</h3>
-        <label>Interviewer voice</label><select id="st_voice"><option value="browser">Browser speech (instant)</option><option value="mac">Mac system voice (higher quality, via server)</option><option value="off">Off (read the question)</option></select>
+        <label>Interviewer voice</label><select id="st_voice"><option value="mac">Server voice: neural Kokoro when installed, else Mac system voice (most natural)</option><option value="browser">Browser speech (instant, lowest quality)</option><option value="off">Off (read the question)</option></select>
+        <div id="engine_info" class="hint"></div>
+        <label>Neural voice (Kokoro)</label><select id="st_kvoice"><option value="">per persona (analyst af_heart · associate am_michael · VP am_fenrir · MD am_onyx · Hot Seat bm_george)</option></select>
         <label>Browser voice</label><select id="st_bvoice"><option value="">auto</option>${bvoices.map(v=>`<option>${esc(v.name)}</option>`).join('')}</select>
         <label>Mac voice</label><select id="st_mvoice"><option value="">auto by persona</option>${voices.map(v=>`<option ${v.preferred?'':'class="dim"'}>${esc(v.name)}</option>`).join('')}</select>
         <label>Speech rate (Mac wpm; blank = persona default)</label><input id="st_rate" type="number" min="120" max="240" value="${LS.get('ttsRate','')||''}" placeholder="persona default">
@@ -641,14 +643,15 @@ route('settings', async () => {
     </div>
     <div class="row" style="margin-top:16px"><button class="primary" id="save">Save</button><span class="muted small" id="saved"></span></div>`;
   $('#st_llm').value = SETTINGS.llm_provider || 'auto'; $('#st_excerpts').checked = SETTINGS.send_guide_excerpts !== false; $('#st_use_llm').checked = SETTINGS.use_llm !== false; $('#st_llm_iv').checked = SETTINGS.llm_interviewer !== false;
-  $('#st_voice').value = voiceMode(); $('#st_bvoice').value = LS.get('browserVoice','')||''; $('#st_mvoice').value = LS.get('macVoice','')||''; $('#st_mic').value = LS.get('micId','')||'';
+  $('#st_voice').value = LS.get('voiceMode', null) || (h.tts && h.tts.neural ? 'mac' : 'browser'); try { const eng = await api('/tts/engines'); $('#engine_info').innerHTML = `Active server engine: <b>${esc(eng.active)}</b>${eng.kokoro.installed ? ` · Kokoro ${eng.kokoro.running ? 'running' : 'installed (starts on first use)'}` : ' · Kokoro not installed'}.`; if (eng.kokoro.voices.length) { $('#st_kvoice').innerHTML += eng.kokoro.voices.map(v=>`<option value="${v}" ${eng.kokoro.selected===v?'selected':''}>${v}</option>`).join(''); } } catch(e) {}
+  $('#st_bvoice').value = LS.get('browserVoice','')||''; $('#st_mvoice').value = LS.get('macVoice','')||''; $('#st_mic').value = LS.get('micId','')||'';
   $('#st_autostop').checked = LS.get('autoStop', true); $('#st_interrupt').checked = LS.get('interruptLong', true); $('#st_barge').checked = LS.get('bargeIn', true); $('#st_expr').checked = LS.get('expressive', true); $('#st_live').checked = LS.get('liveCaptions', true); $('#st_autorec').checked = LS.get('autoRecord', false); $('#st_autosub').checked = LS.get('autoSubmit', false); $('#st_keep').checked = LS.get('keepAudio', false);
   $('#st_health').checked = !!SETTINGS.include_health_story;
   $('#probe').onclick = async () => { const r = await api('/llm/probe', {method:'POST'}); toast(r.cli_logged_in ? 'Claude CLI is logged in and usable.' : 'Claude CLI not logged in: ' + (r.status.last_error||'').slice(0,120), !r.cli_logged_in); render(); };
   $('#save').onclick = async () => {
     LS.set('voiceMode', $('#st_voice').value); LS.set('browserVoice', $('#st_bvoice').value||null); LS.set('macVoice', $('#st_mvoice').value||null); LS.set('ttsRate', $('#st_rate').value ? +$('#st_rate').value : null); LS.set('micId', $('#st_mic').value||null);
     LS.set('autoStop', $('#st_autostop').checked); LS.set('interruptLong', $('#st_interrupt').checked); LS.set('bargeIn', $('#st_barge').checked); LS.set('expressive', $('#st_expr').checked); LS.set('pauseScale', +$('#st_pause').value); LS.set('liveCaptions', $('#st_live').checked); LS.set('autoRecord', $('#st_autorec').checked); LS.set('autoSubmit', $('#st_autosub').checked); LS.set('keepAudio', $('#st_keep').checked);
-    await api('/settings', {method:'POST', body:{settings:{llm_provider: $('#st_llm').value, use_llm: $('#st_use_llm').checked, llm_interviewer: $('#st_llm_iv').checked, silence_seconds: +$('#st_sil').value, min_answer_seconds: +$('#st_min').value, include_health_story: $('#st_health').checked, send_guide_excerpts: $('#st_excerpts').checked}}});
+    await api('/settings', {method:'POST', body:{settings:{llm_provider: $('#st_llm').value, use_llm: $('#st_use_llm').checked, llm_interviewer: $('#st_llm_iv').checked, silence_seconds: +$('#st_sil').value, min_answer_seconds: +$('#st_min').value, include_health_story: $('#st_health').checked, send_guide_excerpts: $('#st_excerpts').checked, kokoro_voice: $('#st_kvoice').value || null, tts_engine: 'auto'}}});
     $('#saved').textContent = 'Saved.'; loadHealth();
   };
 });
