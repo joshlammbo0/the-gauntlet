@@ -1,0 +1,16 @@
+#!/usr/bin/expect -f
+# Drives `gh auth login --web`; answers the terminal capability queries gh's prompt library sends.
+set timeout 600
+set gh [file join $env(HOME) .local bin gh]
+spawn $gh auth login --hostname github.com --git-protocol https --web --scopes repo,workflow
+expect {
+  -re {\x1b\[6n} { send "\x1b\[1;1R"; exp_continue }
+  -re {\x1b\]11;\?} { send "\x1b\]11;rgb:0000/0000/0000\x1b\\"; exp_continue }
+  -re {\(Y/n\)} { after 300; send "Y\r"; exp_continue }
+  -re {code: ([A-Z0-9-]{4,})} { puts "\n=== ONE-TIME CODE: $expect_out(1,string) ===\n"; exp_continue }
+  -re {Press Enter} { after 300; send "\r"; exp_continue }
+  -re {Logged in as} { puts "\nLOGIN COMPLETE" }
+  -re {(?i)error} { puts "\nLOGIN FAILED"; exit 1 }
+  timeout { puts "\nTIMED OUT"; exit 2 }
+  eof { }
+}

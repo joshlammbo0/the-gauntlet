@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Gauntlet 2.0</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0c0f14;--panel:#141922;--panel2:#1b2230;--line:#263043;--text:#e7ecf3;--muted:#8d9ab0;--dim:#5e6a7e;
+  --accent:#d9a441;--accent2:#f0c56a;--good:#3fb27f;--warn:#e0a234;--bad:#e2574f;--info:#5aa5e8;
+  --radius:12px;--mono:'JetBrains Mono',ui-monospace,monospace;--sans:'Inter',system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.45}
+a{color:var(--info);text-decoration:none}
+button{font-family:inherit;font-size:14px;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:8px 14px;border-radius:9px;cursor:pointer;transition:.15s}
+button:hover{border-color:var(--accent);color:var(--accent2)}
+button.primary{background:var(--accent);color:#1a1405;border-color:var(--accent);font-weight:600}
+button.primary:hover{background:var(--accent2);color:#1a1405}
+button.danger{border-color:#5a2a28;color:#f0a09a}
+button.ghost{background:transparent}
+button:disabled{opacity:.45;cursor:not-allowed}
+input,select,textarea{font-family:inherit;font-size:14px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+textarea{min-height:110px;resize:vertical;line-height:1.5}
+label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;text-transform:uppercase;letter-spacing:.05em}
+.app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+nav{background:var(--panel);border-right:1px solid var(--line);padding:18px 14px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:4px}
+nav .brand{font-weight:700;letter-spacing:.12em;font-size:13px;color:var(--accent);padding:6px 10px 14px;text-transform:uppercase}
+nav .brand small{display:block;color:var(--dim);letter-spacing:0;text-transform:none;font-weight:400;font-size:11px;margin-top:2px}
+nav a.item{display:block;padding:9px 10px;border-radius:8px;color:var(--muted);font-weight:500}
+nav a.item:hover,nav a.item.active{background:var(--panel2);color:var(--text)}
+nav .status{margin-top:auto;font-size:11px;color:var(--dim);font-family:var(--mono);line-height:1.6;padding:10px}
+nav .status b{color:var(--muted);font-weight:500}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--dim)}
+.dot.ok{background:var(--good)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+main{padding:28px 36px;max-width:1200px;width:100%}
+h1{font-size:26px;margin:0 0 6px;font-weight:700}
+h2{font-size:17px;margin:26px 0 10px;font-weight:600}
+h3{font-size:14px;margin:16px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+.sub{color:var(--muted);margin:0 0 18px}
+.grid{display:grid;gap:14px}
+.grid.cols2{grid-template-columns:repeat(2,1fr)}.grid.cols3{grid-template-columns:repeat(3,1fr)}.grid.cols4{grid-template-columns:repeat(4,1fr)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+.card.click{cursor:pointer;transition:.15s}.card.click:hover{border-color:var(--accent);transform:translateY(-1px)}
+.card h4{margin:0 0 6px;font-size:15px}
+.card p{margin:0;color:var(--muted);font-size:13px}
+.pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-right:6px;font-family:var(--mono)}
+.pill.good{color:var(--good);border-color:#24523d}.pill.warn{color:var(--warn);border-color:#5a4418}.pill.bad{color:var(--bad);border-color:#5a2a28}.pill.info{color:var(--info);border-color:#234a6b}.pill.acc{color:var(--accent2);border-color:#5a4418}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spacer{flex:1}
+.mono{font-family:var(--mono);font-size:12px}
+.muted{color:var(--muted)}.dim{color:var(--dim)}.small{font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+.bar{height:6px;background:var(--panel2);border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent)}
+.bar.good i{background:var(--good)}.bar.warn i{background:var(--warn)}.bar.bad i{background:var(--bad)}
+.hidden{display:none !important}
+/* interview room */
+.room{display:grid;grid-template-columns:1fr 340px;gap:18px;align-items:start}
+.stage{background:linear-gradient(180deg,#151b26,#0f131b);border:1px solid var(--line);border-radius:16px;padding:28px;min-height:520px;display:flex;flex-direction:column}
+.interviewer{display:flex;gap:16px;align-items:center;margin-bottom:22px}
+.avatar{width:58px;height:58px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#3a4a66,#1a2130);border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--accent2);position:relative;flex:none}
+.avatar.speaking{border-color:var(--accent);box-shadow:0 0 0 4px rgba(217,164,65,.18);animation:pulse 1.2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 2px rgba(217,164,65,.25)}50%{box-shadow:0 0 0 9px rgba(217,164,65,.05)}100%{box-shadow:0 0 0 2px rgba(217,164,65,.25)}}
+.interviewer .who b{display:block;font-size:15px}.interviewer .who span{color:var(--muted);font-size:13px}
+.question{font-size:22px;line-height:1.4;font-weight:500;margin:6px 0 18px;min-height:64px}
+.question.followup{font-size:19px}
+.ctrls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:auto;padding-top:18px;border-top:1px solid var(--line)}
+.mic{width:74px;height:74px;border-radius:50%;border:2px solid var(--line);background:var(--panel2);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:.15s;flex:none}
+.mic:hover{border-color:var(--accent)}
+.mic.rec{background:#5a1f1c;border-color:var(--bad);animation:pulse-red 1s infinite}
+.mic.busy{opacity:.6;cursor:wait}
+@keyframes pulse-red{0%{box-shadow:0 0 0 2px rgba(226,87,79,.3)}50%{box-shadow:0 0 0 12px rgba(226,87,79,.04)}100%{box-shadow:0 0 0 2px rgba(226,87,79,.3)}}
+.mic svg{width:30px;height:30px;fill:var(--text)}
+.level{width:140px;height:8px;background:var(--panel2);border-radius:4px;overflow:hidden}
+.level i{display:block;height:100%;width:0;background:var(--good);transition:width .08s}
+.recstatus{font-family:var(--mono);font-size:12px;color:var(--muted);min-width:170px}
+.timer{font-family:var(--mono);font-size:13px;color:var(--muted)}
+.timer b{color:var(--text);font-weight:500}
+.transcript{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:14px;font-size:14px;min-height:72px;color:var(--text)}
+.transcript .interim{color:var(--dim);font-style:italic}
+.side .card{margin-bottom:14px}
+.log{max-height:360px;overflow:auto;font-size:13px}
+.log .t{padding:8px 0;border-bottom:1px solid var(--line)}
+.log .t.i{color:var(--accent2)}.log .t.c{color:var(--text)}
+.log .t small{display:block;color:var(--dim);font-family:var(--mono);font-size:11px}
+.scorebox{font-family:var(--mono);font-size:12px}
+.scorebox .big{font-size:28px;font-weight:600;color:var(--accent2);font-family:var(--sans)}
+.toast{position:fixed;right:20px;bottom:20px;background:var(--panel2);border:1px solid var(--line);padding:10px 14px;border-radius:10px;font-size:13px;max-width:380px;z-index:50;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.toast.bad{border-color:var(--bad)}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;font-size:13px}
+.kv div:nth-child(odd){color:var(--muted)}
+details{border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:8px 0;background:var(--panel)}
+summary{cursor:pointer;font-weight:500}
+.q-item{padding:12px 0;border-bottom:1px solid var(--line)}
+.q-item .q{font-weight:600;margin-bottom:4px}
+.q-item .a{color:var(--muted);font-size:13px;white-space:pre-wrap;margin:6px 0}
+.q-item ul{margin:6px 0 6px 18px;padding:0;font-size:13px}
+.q-item .fix{background:var(--panel2);border-left:3px solid var(--accent);padding:8px 12px;border-radius:0 8px 8px 0;font-size:13px;margin-top:8px}
+.score-chip{font-family:var(--mono);font-weight:600;padding:2px 8px;border-radius:6px;background:var(--panel2)}
+.score-chip.good{color:var(--good)}.score-chip.warn{color:var(--warn)}.score-chip.bad{color:var(--bad)}
+.heat{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+.heat .cell{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12px}
+.heat .cell b{display:block;font-size:12px;font-weight:500;margin-bottom:5px}
+.heat .cell.na{opacity:.6}
+.setup label{margin-top:12px}
+.hint{font-size:12px;color:var(--dim);margin-top:4px}
+.badge-src{font-size:10px;font-family:var(--mono);color:var(--dim)}
+.cols{columns:2;column-gap:28px}
+.cols > *{break-inside:avoid}
+@media (max-width:1000px){.app{grid-template-columns:1fr}nav{position:static;height:auto;flex-direction:row;flex-wrap:wrap}.room{grid-template-columns:1fr}.grid.cols3,.grid.cols4,.grid.cols2{grid-template-columns:1fr}main{padding:18px 16px}.cols{columns:1}}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav>
+    <div class="brand">The Gauntlet 2.0<small>Master the technicals. Survive the superday.</small></div>
+    <a class="item" href="#/home" data-route="home">Dashboard</a>
+    <a class="item" href="#/career" data-route="career">Career mode</a>
+    <a class="item" href="#/lab" data-route="lab">Weakness lab</a>
+    <a class="item" href="#/modeling" data-route="modeling">Modeling lab</a>
+    <a class="item" href="#/skills" data-route="skills">Skill graph</a>
+    <a class="item" href="#/resume" data-route="resume">Resume defense</a>
+    <a class="item" href="#/history" data-route="history">History</a>
+    <a class="item" href="#/bank" data-route="bank">Question bank</a>
+    <a class="item" href="#/profile" data-route="profile">Profile &amp; KB</a>
+    <a class="item" href="#/settings" data-route="settings">Settings</a>
+    <div class="status" id="navstatus">loading…</div>
+  </nav>
+  <main id="main"></main>
+</div>
+<div id="toast" class="toast hidden"></div>
+<script src="/app.js"></script>
+<script src="/game.js"></script>
+</body>
+</html>
